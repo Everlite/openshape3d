@@ -1,0 +1,48 @@
+name: Build iPad IPA
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-ipad.yml'
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.0.app || sudo xcode-select -s /Applications/Xcode_16.1.app || sudo xcode-select -s /Applications/Xcode.app || true
+          xcodebuild -version
+
+      - name: Build and Archive
+        run: |
+          xcodebuild archive \
+            -project openshape3d.xcodeproj \
+            -scheme openshape3d \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/openshape3d.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES
+
+      - name: Package IPA
+        run: |
+          mkdir -p build/Payload
+          cp -R build/openshape3d.xcarchive/Products/Applications/*.app build/Payload/
+          cd build
+          zip -qr openshape3d.ipa Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openshape3d-ipad
+          path: build/openshape3d.ipa
+          retention-days: 7
