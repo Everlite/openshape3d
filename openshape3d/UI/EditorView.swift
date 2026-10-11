@@ -943,6 +943,607 @@ struct EditorView: View {
     /// Viewport + floating chrome + toolbar; the presentation modifiers
     /// (importers, exporters, sheets, alerts) attach in `editorContent`.
     /// Split keeps each expression type-checkable in reasonable time.
+    @ViewBuilder
+    private func sketchOverlays(_ viewModel: EditorViewModel) -> some View {
+        marqueeOverlay(viewModel)
+        if !viewModel.isPickingSymmetryAxis {
+            SketchConstraintOverlay(viewModel: viewModel)
+        }
+        SketchPointStateOverlay(viewModel: viewModel)
+        SketchLiveDimensionOverlay(viewModel: viewModel)
+        if !viewModel.isPickingSymmetryAxis {
+            SketchDimensionOverlay(viewModel: viewModel)
+            SketchTransformControlsOverlay(viewModel: viewModel)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea()
+            SketchRadialHandleOverlay(viewModel: viewModel)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea()
+            SketchRectangleEdgeHandleOverlay(viewModel: viewModel)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea()
+        }
+    }
+
+    @ViewBuilder
+    private func gizmoAnd3DOverlays(_ viewModel: EditorViewModel) -> some View {
+        OrientationCubeLabels(viewModel: viewModel)
+        MoveGizmoOverlay(viewModel: viewModel)
+        SnapChipOverlay(viewModel: viewModel)
+        ExtrudeGizmoOverlay(viewModel: viewModel)
+        MoveDistanceOverlay(viewModel: viewModel)
+        RotationOrbitOverlay(viewModel: viewModel)
+        CommandShortcutsView(viewModel: viewModel)
+        if viewModel.commandSearchActive {
+            CommandSearchView(viewModel: viewModel)
+        }
+    }
+
+    @ViewBuilder
+    private func bottomBarsOverlay(_ viewModel: EditorViewModel) -> some View {
+        VStack(spacing: 10) {
+            SelectionInfoBar(viewModel: viewModel)
+            if case .pickingBlendEdges(let kind) = viewModel.mode {
+                blendBar(kind, viewModel)
+            } else if case .pickingShellFaces = viewModel.mode {
+                shellBar(viewModel)
+            } else if case .pickingDeleteFaces = viewModel.mode {
+                deleteFaceBar(viewModel)
+            } else if case .pickingReplaceFace = viewModel.mode {
+                replaceFaceBar(viewModel)
+            } else if case .pickingAxisReferences = viewModel.mode {
+                axisBar(viewModel)
+            } else if viewModel.mode.sketchTool == .offset {
+                sketchOffsetBar(viewModel)
+            } else {
+                NumericInputBar(viewModel: viewModel)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 12)
+        .measuringBottomBarHeight()
+    }
+
+    @ViewBuilder
+    private func bottomTrailingBadgesOverlay(_ viewModel: EditorViewModel) -> some View {
+        if viewModel.gizmoOrigin != nil {
+            HStack(spacing: 10) {
+                if viewModel.gizmoRepositionArmed {
+                    Text("Tap or drag where the gizmo should sit")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.orange, in: Capsule())
+                        .accessibilityIdentifier("GizmoRepositionHint")
+                }
+                if viewModel.gizmoRepositionArmed, viewModel.gizmoPivotIsOffset {
+                    Button {
+                        viewModel.recenterGizmoPivot()
+                    } label: {
+                        Label("Recenter", systemImage: "arrow.counterclockwise")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Color.secondary)
+                    .background(.regularMaterial, in: Capsule())
+                    .accessibilityIdentifier("RecenterBadge")
+                }
+                Button {
+                    viewModel.toggleGizmoReposition()
+                } label: {
+                    Label(viewModel.gizmoRepositionArmed ? "Done" : "Reposition",
+                          systemImage: viewModel.gizmoRepositionArmed ? "checkmark" : "scope")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .tint(viewModel.gizmoRepositionArmed ? Color.orange : Color.secondary)
+                .background(.regularMaterial, in: Capsule())
+                .accessibilityIdentifier("RepositionBadge")
+                Button {
+                    viewModel.copyOnDrag.toggle()
+                } label: {
+                    Label("Copy", systemImage: "plus.square.on.square")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .tint(viewModel.copyOnDrag ? Color.blue : Color.secondary)
+                .background(.regularMaterial, in: Capsule())
+                .accessibilityIdentifier("CopyBadge")
+            }
+            .padding(.trailing, 16)
+            .padding(.bottom, bottomBarInset)
+        } else if viewModel.mode.isSketching, viewModel.mode.sketchTool == nil,
+                  viewModel.editingDimension == nil,
+                  (!viewModel.selectedSketchEntityIDs.isEmpty || viewModel.sketchTransformActive) {
+            HStack {
+                if !viewModel.selectedSketchEntityIDs.isEmpty || viewModel.sketchTransformActive {
+                    Button(viewModel.sketchTransformActive ? "Done" : "Move/Rotate") {
+                        viewModel.sketchTransformActive.toggle()
+                    }
+                    .buttonStyle(.bordered)
+                    .background(.regularMaterial, in: Capsule())
+                    .accessibilityIdentifier("SketchTransformMode")
+                }
+                Button {
+                    if viewModel.usesExplicitSketchTransform { viewModel.sketchTransformActive = true }
+                    viewModel.sketchCopyOnDrag.toggle()
+                } label: {
+                    Label("Copy", systemImage: "plus.square.on.square")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .tint(viewModel.sketchCopyOnDrag ? Color.blue : Color.secondary)
+                .background(.regularMaterial, in: Capsule())
+                .accessibilityIdentifier("SketchCopyBadge")
+                .disabled(viewModel.selectedSketchEntityIDs.isEmpty)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.trailing, 16)
+            .padding(.bottom, bottomBarInset)
+        } else if viewModel.sectionState != nil {
+            HStack(spacing: 8) {
+                Button {
+                    viewModel.flipSection()
+                } label: {
+                    Label("Flip", systemImage: "arrow.left.arrow.right")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .accessibilityIdentifier("SectionFlip")
+                Button {
+                    viewModel.endSection()
+                } label: {
+                    Label("Section Off", systemImage: "xmark")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .accessibilityIdentifier("SectionOff")
+            }
+            .buttonStyle(.bordered)
+            .tint(Color.secondary)
+            .background(.regularMaterial, in: Capsule())
+            .padding(.trailing, 16)
+            .padding(.bottom, bottomBarInset)
+        }
+    }
+
+    @ViewBuilder
+    private func topStatusPillsOverlay(_ viewModel: EditorViewModel) -> some View {
+        if let tool = viewModel.pendingCreateTool {
+            statusPill(
+                icon: "cube",
+                text: "Tap a sketch region to \(tool.rawValue.capitalized)"
+            ) {
+                Button("Cancel") { viewModel.cancelCreate() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier("CreateToolCancel")
+            }
+        } else if viewModel.selectModeActive {
+            selectModePill(viewModel)
+        } else if viewModel.mode.isSketching, let symbol = viewModel.pendingSymbol {
+            statusPill(
+                icon: "rectangle.stack",
+                text: "Tap to place \"\(symbol.name)\""
+            ) {
+                Button("Done") {
+                    viewModel.cancelInsertSymbol()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .keyboardShortcut(.cancelAction)
+                .accessibilityIdentifier("InsertSymbolDone")
+            }
+        } else if viewModel.mode.isSketching {
+            VStack(spacing: 8) {
+                if viewModel.mode.sketchTool == .rect {
+                    HStack(spacing: 12) {
+                        Menu {
+                            ForEach(RectangleType.allCases, id: \.self) { type in
+                                Button(type.title + " Rectangle") { viewModel.setRectangleType(type) }
+                                    .accessibilityIdentifier("RectangleType-" + type.rawValue)
+                            }
+                        } label: {
+                            Label(viewModel.rectangleType.title + " Rectangle", systemImage: "chevron.down")
+                        }
+                        .accessibilityIdentifier("RectangleTypeMenu")
+                        Text(viewModel.rectangleInstruction).font(.caption)
+                        if viewModel.hasPendingRectangle {
+                            Button("Cancel Rectangle") { viewModel.clearRectanglePlacement() }
+                                .accessibilityIdentifier("CancelRectangle")
+                        }
+                    }
+                    .padding(10)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                }
+                statusPill(icon: "pencil.and.outline", text: sketchStatusText(viewModel)) {
+                    sketchStateChip(viewModel)
+                    if viewModel.lookAtSketchAvailable {
+                        Button("Look at Sketch") {
+                            viewModel.lookAtSketch()
+                        }
+                        .controlSize(.small)
+                        .accessibilityIdentifier("LookAtSketch")
+                    }
+                    if viewModel.isPickingSymmetryAxis {
+                        Button("Cancel Symmetry") { viewModel.cancelSymmetryAxisPick() }
+                            .accessibilityIdentifier("CancelSymmetry")
+                    }
+                    Button("Exit Sketching") {
+                        viewModel.finishSketch()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+            }
+        } else if case .pickingSketchPlane = viewModel.mode {
+            statusPill(
+                icon: "square.3.layers.3d",
+                text: "Choose a sketch plane"
+            ) {
+                Button("Cancel") {
+                    viewModel.cancelPlanePicking()
+                }
+                .controlSize(.small)
+                .keyboardShortcut(.cancelAction)
+            }
+        } else if case .pickingSectionPlane = viewModel.mode {
+            statusPill(
+                icon: "square.split.diagonal.2x2",
+                text: "Choose a section plane"
+            ) {
+                Button("Cancel") {
+                    viewModel.cancelSectionPlanePick()
+                }
+                .controlSize(.small)
+                .keyboardShortcut(.cancelAction)
+            }
+        } else if case .pickingImagePlane = viewModel.mode {
+            statusPill(
+                icon: "photo",
+                text: "Tap a plane for the image"
+            ) {
+                Button("Cancel") {
+                    viewModel.cancelImagePlanePick()
+                }
+                .controlSize(.small)
+                .keyboardShortcut(.cancelAction)
+            }
+        } else if case .pickingBooleanTool(let kind, _) = viewModel.mode {
+            statusPill(
+                icon: "square.on.square",
+                text: "Tap the second body to \(kind.rawValue)"
+            ) {
+                Button("Cancel") {
+                    viewModel.cancelBooleanPicking()
+                }
+                .controlSize(.small)
+                .keyboardShortcut(.cancelAction)
+            }
+        } else if case .pickingFeatureBody = viewModel.mode {
+            statusPill(
+                icon: "cube",
+                text: viewModel.featureBodyPickPrompt ?? "Tap the body"
+            ) {
+                Button("Cancel") {
+                    viewModel.cancelFeatureBodyPick()
+                }
+                .controlSize(.small)
+                .keyboardShortcut(.cancelAction)
+            }
+        } else if case .pickingFeatureFace = viewModel.mode {
+            statusPill(
+                icon: "square.on.square.dashed",
+                text: viewModel.featureFacePickPrompt ?? "Tap the face"
+            ) {
+                Button("Cancel") {
+                    viewModel.cancelFeatureFacePick()
+                }
+                .controlSize(.small)
+                .keyboardShortcut(.cancelAction)
+            }
+        } else if case .pickingFeatureProfile = viewModel.mode {
+            statusPill(
+                icon: "pencil.and.outline",
+                text: viewModel.featureProfilePickPrompt ?? "Tap the profile"
+            ) {
+                Button("Cancel") {
+                    viewModel.cancelFeatureProfilePick()
+                }
+                .controlSize(.small)
+                .keyboardShortcut(.cancelAction)
+            }
+        } else if case .pickingRevolveAxis = viewModel.mode {
+            statusPill(
+                icon: "arrow.triangle.2.circlepath",
+                text: "Tap a sketch line to set the revolve axis"
+            ) {
+                Button("Cancel") {
+                    viewModel.cancelRevolveAxisPick()
+                }
+                .controlSize(.small)
+                .keyboardShortcut(.cancelAction)
+            }
+        } else if case .pickingSweepPath = viewModel.mode {
+            let count = viewModel.toolContext?.sweepPathEntityIDs.count ?? 0
+            statusPill(
+                icon: "point.topleft.down.to.point.bottomright.curvepath",
+                text: count == 0
+                    ? "Tap sketch lines to build the sweep path"
+                    : "Sweep path: \(count) segment\(count == 1 ? "" : "s") chained"
+            ) {
+                Button("Cancel") {
+                    viewModel.cancelSweepPathPick()
+                }
+                .controlSize(.small)
+                .keyboardShortcut(.cancelAction)
+            }
+        } else if case .pickingLoftProfiles = viewModel.mode {
+            let count = viewModel.toolContext?.loftProfiles.count ?? 0
+            statusPill(
+                icon: "square.stack.3d.up",
+                text: count < 2
+                    ? "Tap profile fills to add loft sections"
+                    : "Loft: \(count) sections in tap order"
+            ) {
+                Button("Cancel") {
+                    viewModel.cancelLoftProfilePick()
+                }
+                .controlSize(.small)
+                .keyboardShortcut(.cancelAction)
+            }
+        } else if case .pickingSplitCutter = viewModel.mode {
+            statusPill(
+                icon: "square.split.1x2",
+                text: "Tap a plane or profile to split"
+            ) {
+                Button("Cancel") {
+                    viewModel.cancelSplitCutterPick()
+                }
+                .controlSize(.small)
+                .keyboardShortcut(.cancelAction)
+            }
+        } else if case .patterning = viewModel.mode {
+            statusPill(
+                icon: "square.grid.3x3",
+                text: "Set pattern options below, then Apply"
+            ) {
+                Button("Cancel") {
+                    viewModel.cancelPattern()
+                }
+                .controlSize(.small)
+                .keyboardShortcut(.cancelAction)
+            }
+        } else if case .rotatingAroundAxis = viewModel.mode {
+            statusPill(
+                icon: "arrow.clockwise",
+                text: viewModel.rotateAxisState?.hasAxis == true
+                    ? "Drag to rotate, or type an angle"
+                    : "Tap a sketch line, or pick a world axis"
+            ) {
+                if viewModel.rotateAxisState?.hasAxis != true {
+                    Button("X") { viewModel.setRotateWorldAxis(.x) }
+                        .controlSize(.small)
+                        .accessibilityIdentifier("RotateAxisX")
+                    Button("Y") { viewModel.setRotateWorldAxis(.y) }
+                        .controlSize(.small)
+                        .accessibilityIdentifier("RotateAxisY")
+                    Button("Z") { viewModel.setRotateWorldAxis(.z) }
+                        .controlSize(.small)
+                        .accessibilityIdentifier("RotateAxisZ")
+                }
+                Button("Cancel") {
+                    viewModel.cancelRotateAxis()
+                }
+                .controlSize(.small)
+                .keyboardShortcut(.cancelAction)
+            }
+        } else if case .translating = viewModel.mode {
+            statusPill(
+                icon: "arrow.right.to.line",
+                text: viewModel.transformPickPoints.isEmpty
+                    ? "Tap the source point"
+                    : "Tap the destination point"
+            ) {
+                Button("Cancel") {
+                    viewModel.cancelTranslate()
+                }
+                .controlSize(.small)
+                .keyboardShortcut(.cancelAction)
+            }
+        } else if case .aligning = viewModel.mode {
+            statusPill(
+                icon: "point.3.connected.trianglepath.dotted",
+                text: viewModel.transformPickPoints.isEmpty
+                    ? "Tap a point on the body to move"
+                    : "Tap the destination point"
+            ) {
+                Button("Cancel") {
+                    viewModel.cancelAlign()
+                }
+                .controlSize(.small)
+                .keyboardShortcut(.cancelAction)
+            }
+        } else if case .measuring = viewModel.mode {
+            measurePill(viewModel)
+        } else if case .faceSelected = viewModel.mode {
+            statusPill(
+                icon: viewModel.notice != nil
+                    ? "exclamationmark.circle.fill"
+                    : "square.3.layers.3d.top.filled",
+                text: viewModel.notice ?? (viewModel.faceMoveActive
+                    ? "Move face — drag to shear the solid"
+                    : viewModel.faceScaleActive
+                        ? "Scale face — drag to taper the solid"
+                        : viewModel.faceRotateActive
+                            ? "Rotate face — drag a ring to tilt the solid"
+                            : viewModel.toolContext?.curvedRegion == true
+                                ? "Curved face — no push/pull or transform"
+                                : "Face selected — drag it to push or pull")
+            ) {
+                Button("Done") {
+                    viewModel.commitTool()
+                }
+                .controlSize(.small)
+            }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private func editorToolbar(_ viewModel: EditorViewModel) -> some ToolbarContent {
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button {
+                viewModel.undo()
+            } label: {
+                ZStack {
+                    Color.clear
+                    Image(systemName: "arrow.uturn.backward")
+                }
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+                .accessibilityLabel("Undo")
+            }
+            .disabled(!viewModel.session.undoStack.canUndo && !viewModel.hasPendingRectangle)
+            .accessibilityIdentifier("UndoButton")
+
+            Button {
+                viewModel.redo()
+            } label: {
+                ZStack {
+                    Color.clear
+                    Image(systemName: "arrow.uturn.forward")
+                }
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+                .accessibilityLabel("Redo")
+            }
+            .disabled(!viewModel.session.undoStack.canRedo)
+            .accessibilityIdentifier("RedoButton")
+
+            Button {
+                viewModel.fitView()
+            } label: {
+                Label("Fit View", systemImage: "arrow.up.left.and.arrow.down.right")
+            }
+
+            Menu {
+                ForEach(StandardView.allCases) { standard in
+                    Button(standard.rawValue) {
+                        viewModel.applyStandardView(standard)
+                    }
+                }
+                Divider()
+                Toggle("Orthographic", isOn: Binding(
+                    get: { viewModel.orthographicEnabled },
+                    set: { viewModel.setOrthographic($0) }
+                ))
+                Divider()
+                Menu {
+                    Picker("Display", selection: Binding(
+                        get: { viewModel.displayMode },
+                        set: { viewModel.displayMode = $0 }
+                    )) {
+                        ForEach(DisplayMode.allCases, id: \.self) { mode in
+                            Text(mode.displayLabel).tag(mode)
+                        }
+                    }
+                    Divider()
+                    Toggle("Show Hidden Edges", isOn: Binding(
+                        get: { viewModel.showHiddenEdges },
+                        set: { viewModel.showHiddenEdges = $0 }
+                    ))
+                } label: {
+                    Label(
+                        "Display: \(viewModel.displayMode.displayLabel)",
+                        systemImage: "cube.transparent"
+                    )
+                }
+                Toggle("Ground Shadow", isOn: Binding(
+                    get: { viewModel.groundShadowEnabled },
+                    set: { viewModel.groundShadowEnabled = $0 }
+                ))
+                if viewModel.isIsolateActive {
+                    Button("Exit Isolate") {
+                        viewModel.exitIsolate()
+                    }
+                } else {
+                    Button("Isolate") {
+                        viewModel.enterIsolate()
+                    }
+                    .disabled(viewModel.selection.isEmpty)
+                }
+                if viewModel.sectionState != nil {
+                    Button("Flip Section") {
+                        viewModel.flipSection()
+                    }
+                    Button("Section Off") {
+                        viewModel.endSection()
+                    }
+                } else {
+                    Button("Section") {
+                        viewModel.beginSectionPlanePick()
+                    }
+                }
+            } label: {
+                Label("Views", systemImage: "square.stack.3d.up")
+            }
+            .accessibilityIdentifier("ViewsMenu")
+
+            Button {
+                viewModel.showHistoryPanel.toggle()
+            } label: {
+                Label("History", systemImage: "clock.arrow.circlepath")
+            }
+            .accessibilityIdentifier("HistoryButton")
+
+            Button {
+                viewModel.showVariablesPanel.toggle()
+            } label: {
+                Label("Variables", systemImage: "function")
+            }
+            .accessibilityIdentifier("VariablesButton")
+
+            Button {
+                showItemsPanel.toggle()
+            } label: {
+                Label("Items", systemImage: "sidebar.trailing")
+            }
+            .accessibilityIdentifier("ItemsButton")
+
+            importMenu(viewModel)
+
+            exportMenu(viewModel)
+
+            Button {
+                viewModel.openCommandSearch()
+            } label: {
+                Label("Command Search", systemImage: "magnifyingglass")
+            }
+            .accessibilityIdentifier("CommandSearchButton")
+
+            Button {
+                showBugReport = true
+            } label: {
+                Label("Report a Bug", systemImage: "ladybug")
+            }
+            .accessibilityIdentifier("BugReportButton")
+
+            Button {
+                showSettings = true
+            } label: {
+                ZStack {
+                    Color.clear
+                    Image(systemName: "gearshape")
+                    Text("Settings").opacity(0).frame(width: 0)
+                }
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+                .accessibilityLabel("Settings")
+            }
+            .accessibilityIdentifier("SettingsButton")
+        }
+    }
+
     private func viewportChrome(_ viewModel: EditorViewModel) -> some View {
         // On a phone the palette covers a sixth of the width: Zoom to Fit
         // frames, and the view centres, in the strip it leaves visible.
@@ -951,87 +1552,10 @@ struct EditorView: View {
                      paletteOnRight: settings.paletteOnRight)
             .ignoresSafeArea()
             .overlay {
-                marqueeOverlay(viewModel)
+                sketchOverlays(viewModel)
             }
             .overlay {
-                // Constraint glyphs: tap to select, Delete removes (plan §C3).
-                // Below the dimension overlay so that when an auto-constraint
-                // glyph and a dimension label share an anchor (e.g. a horizontal
-                // line's "H" glyph over its length label), tapping opens the
-                // dimension editor — the primary interaction — rather than
-                // selecting the glyph (which is also deletable via the Items
-                // panel).
-                if !viewModel.isPickingSymmetryAxis {
-                    SketchConstraintOverlay(viewModel: viewModel)
-                }
-            }
-            .overlay {
-                // Informational point markers belong below numeric editors:
-                // otherwise endpoint circles paint over opaque keypad keys.
-                SketchPointStateOverlay(viewModel: viewModel)
-            }
-            .overlay {
-                // Pending measurements remain below opaque numeric editors.
-                SketchLiveDimensionOverlay(viewModel: viewModel)
-            }
-            .overlay {
-                // Sketch dimension annotations + inline editors (plan §C2).
-                if !viewModel.isPickingSymmetryAxis {
-                    SketchDimensionOverlay(viewModel: viewModel)
-                }
-            }
-            .overlay {
-                if !viewModel.isPickingSymmetryAxis {
-                    SketchTransformControlsOverlay(viewModel: viewModel)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .ignoresSafeArea()
-                }
-                if !viewModel.isPickingSymmetryAxis {
-                    SketchRadialHandleOverlay(viewModel: viewModel)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .ignoresSafeArea()
-                }
-                if !viewModel.isPickingSymmetryAxis {
-                    SketchRectangleEdgeHandleOverlay(viewModel: viewModel)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .ignoresSafeArea()
-                }
-            }
-            .overlay {
-                // Non-interactive projected overlays, grouped in one ZStack to
-                // keep the modifier chain type-checkable: cube face names
-                // (§7.2), the flat extrude-style move/rotate gizmo (replaces
-                // the Metal mesh; drags stay 3D-hit-tested), and the named-snap
-                // chip while drawing.
-                ZStack {
-                    OrientationCubeLabels(viewModel: viewModel)
-                    MoveGizmoOverlay(viewModel: viewModel)
-                    SnapChipOverlay(viewModel: viewModel)
-                }
-            }
-            .overlay {
-                // Shapr3D on-arrow value pills: extrude / diameter (§4.1), and
-                // the move gizmo's twin — live drag distance, plus the typed
-                // exact-distance field when an arrow is tapped (§5.1). One
-                // ZStack, so the modifier chain stays type-checkable.
-                ZStack {
-                    ExtrudeGizmoOverlay(viewModel: viewModel)
-                    MoveDistanceOverlay(viewModel: viewModel)
-                    RotationOrbitOverlay(viewModel: viewModel)
-                }
-            }
-            .overlay {
-                // Hardware-keyboard hotkeys (spec §8.4). Zero-sized; see
-                // CommandShortcutsView for why the shortcuts ride on buttons.
-                CommandShortcutsView(viewModel: viewModel)
-            }
-            .overlay {
-                // Command Search (spec §8.4). An overlay rather than a sheet:
-                // it must be openable from anywhere, and two sheets cannot be
-                // up at once.
-                if viewModel.commandSearchActive {
-                    CommandSearchView(viewModel: viewModel)
-                }
+                gizmoAnd3DOverlays(viewModel)
             }
             .overlay(alignment: settings.paletteOnRight ? .leading : .trailing) {
                 if viewModel.mode.isSketching, !viewModel.sketchTransformActive, !viewModel.isPickingSymmetryAxis {
@@ -1042,31 +1566,7 @@ struct EditorView: View {
                 }
             }
             .overlay(alignment: .bottom) {
-                VStack(spacing: 10) {
-                    // Selection info strip sits above the numeric bar when
-                    // both are visible (spec §16.3).
-                    SelectionInfoBar(viewModel: viewModel)
-                    // Chamfer/Fillet pick replaces the numeric bar with the
-                    // blend bar (both bottom-anchored; never stacked).
-                    if case .pickingBlendEdges(let kind) = viewModel.mode {
-                        blendBar(kind, viewModel)
-                    } else if case .pickingShellFaces = viewModel.mode {
-                        shellBar(viewModel)
-                    } else if case .pickingDeleteFaces = viewModel.mode {
-                        deleteFaceBar(viewModel)
-                    } else if case .pickingReplaceFace = viewModel.mode {
-                        replaceFaceBar(viewModel)
-                    } else if case .pickingAxisReferences = viewModel.mode {
-                        axisBar(viewModel)
-                    } else if viewModel.mode.sketchTool == .offset {
-                        sketchOffsetBar(viewModel)
-                    } else {
-                        NumericInputBar(viewModel: viewModel)
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 12)
-                .measuringBottomBarHeight()
+                bottomBarsOverlay(viewModel)
             }
             .onPreferenceChange(BottomBarHeightKey.self) { height in
                 bottomBarHeight = height
@@ -1118,409 +1618,10 @@ struct EditorView: View {
                 }
             }
             .overlay(alignment: .bottomTrailing) {
-                // Copy badge (spec §5.1): next gizmo drag moves a duplicate.
-                if viewModel.gizmoOrigin != nil {
-                  HStack(spacing: 10) {
-                    // "Move the gizmo" mode (tap the pivot): say what a touch
-                    // does now, and how to leave (iPad, 2026-09-14).
-                    if viewModel.gizmoRepositionArmed {
-                        Text("Tap or drag where the gizmo should sit")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.orange, in: Capsule())
-                            .accessibilityIdentifier("GizmoRepositionHint")
-                    }
-                    // Recenter: back to the selection's centre once the gizmo
-                    // has been dropped elsewhere (Jason, iPad, 2026-09-14).
-                    if viewModel.gizmoRepositionArmed, viewModel.gizmoPivotIsOffset {
-                        Button {
-                            viewModel.recenterGizmoPivot()
-                        } label: {
-                            Label("Recenter", systemImage: "arrow.counterclockwise")
-                                .font(.subheadline.weight(.semibold))
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(Color.secondary)
-                        .background(.regularMaterial, in: Capsule())
-                        .accessibilityIdentifier("RecenterBadge")
-                    }
-                    // Reposition badge: the same mode a tap on the pivot
-                    // enters, from a button that is easy to hit (the pivot
-                    // dot was still too small a target — Jason, iPad,
-                    // 2026-09-14). Reads "Done" while the mode is on.
-                    Button {
-                        viewModel.toggleGizmoReposition()
-                    } label: {
-                        Label(viewModel.gizmoRepositionArmed ? "Done" : "Reposition",
-                              systemImage: viewModel.gizmoRepositionArmed ? "checkmark" : "scope")
-                            .font(.subheadline.weight(.semibold))
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(viewModel.gizmoRepositionArmed ? Color.orange : Color.secondary)
-                    .background(.regularMaterial, in: Capsule())
-                    .accessibilityIdentifier("RepositionBadge")
-                    Button {
-                        viewModel.copyOnDrag.toggle()
-                    } label: {
-                        Label("Copy", systemImage: "plus.square.on.square")
-                            .font(.subheadline.weight(.semibold))
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(viewModel.copyOnDrag ? Color.blue : Color.secondary)
-                    .background(.regularMaterial, in: Capsule())
-                    .accessibilityIdentifier("CopyBadge")
-                  }
-                    .padding(.trailing, 16)
-                    .padding(.bottom, bottomBarInset)
-                } else if viewModel.mode.isSketching, viewModel.mode.sketchTool == nil,
-                          viewModel.editingDimension == nil,
-                          (!viewModel.selectedSketchEntityIDs.isEmpty || viewModel.sketchTransformActive) {
-                    // Sketch Copy chip (spec §1.10): the next selection-gizmo
-                    // drag moves/rotates duplicates.
-                    HStack {
-                    // Any selection can opt into exact values (Shapr3D: Move/Rotate
-                    // offers arrows plus a keypad for whatever is selected); a
-                    // mixed selection used to have only the drag gizmo.
-                    if !viewModel.selectedSketchEntityIDs.isEmpty || viewModel.sketchTransformActive {
-                        Button(viewModel.sketchTransformActive ? "Done" : "Move/Rotate") {
-                            viewModel.sketchTransformActive.toggle()
-                        }
-                        .buttonStyle(.bordered)
-                        .background(.regularMaterial, in: Capsule())
-                        .accessibilityIdentifier("SketchTransformMode")
-                    }
-                    Button {
-                        if viewModel.usesExplicitSketchTransform { viewModel.sketchTransformActive = true }
-                        viewModel.sketchCopyOnDrag.toggle()
-                    } label: {
-                        Label("Copy", systemImage: "plus.square.on.square")
-                            .font(.subheadline.weight(.semibold))
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(viewModel.sketchCopyOnDrag ? Color.blue : Color.secondary)
-                    .background(.regularMaterial, in: Capsule())
-                    .accessibilityIdentifier("SketchCopyBadge")
-                    .disabled(viewModel.selectedSketchEntityIDs.isEmpty)
-                    }
-                    .fixedSize(horizontal: true, vertical: false)
-                    .padding(.trailing, 16)
-                    .padding(.bottom, bottomBarInset)
-                } else if viewModel.sectionState != nil {
-                    // Section badges (spec §16.1): Flip switches the visible
-                    // side; Off restores the full model.
-                    HStack(spacing: 8) {
-                        Button {
-                            viewModel.flipSection()
-                        } label: {
-                            Label("Flip", systemImage: "arrow.left.arrow.right")
-                                .font(.subheadline.weight(.semibold))
-                        }
-                        .accessibilityIdentifier("SectionFlip")
-                        Button {
-                            viewModel.endSection()
-                        } label: {
-                            Label("Section Off", systemImage: "xmark")
-                                .font(.subheadline.weight(.semibold))
-                        }
-                        .accessibilityIdentifier("SectionOff")
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(Color.secondary)
-                    .background(.regularMaterial, in: Capsule())
-                    .padding(.trailing, 16)
-                    .padding(.bottom, bottomBarInset)
-                }
+                bottomTrailingBadgesOverlay(viewModel)
             }
             .overlay(alignment: .top) {
-                if let tool = viewModel.pendingCreateTool {
-                    // Modify group armed (pick the operation, then the region).
-                    statusPill(
-                        icon: "cube",
-                        text: "Tap a sketch region to \(tool.rawValue.capitalized)"
-                    ) {
-                        Button("Cancel") { viewModel.cancelCreate() }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                            .keyboardShortcut(.cancelAction)
-                            .accessibilityIdentifier("CreateToolCancel")
-                    }
-                } else if viewModel.selectModeActive {
-                    selectModePill(viewModel)
-                } else if viewModel.mode.isSketching, let symbol = viewModel.pendingSymbol {
-                    // Insert Symbol armed (plan §B16): each tap stamps an
-                    // instance; Done (or Esc) exits placement.
-                    statusPill(
-                        icon: "rectangle.stack",
-                        text: "Tap to place \"\(symbol.name)\""
-                    ) {
-                        Button("Done") {
-                            viewModel.cancelInsertSymbol()
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                        .keyboardShortcut(.cancelAction)
-                        .accessibilityIdentifier("InsertSymbolDone")
-                    }
-                } else if viewModel.mode.isSketching {
-                    VStack(spacing: 8) {
-                        if viewModel.mode.sketchTool == .rect {
-                            HStack(spacing: 12) {
-                                Menu {
-                                    ForEach(RectangleType.allCases, id: \.self) { type in
-                                        Button(type.title + " Rectangle") { viewModel.setRectangleType(type) }
-                                            .accessibilityIdentifier("RectangleType-" + type.rawValue)
-                                    }
-                                } label: {
-                                    Label(viewModel.rectangleType.title + " Rectangle", systemImage: "chevron.down")
-                                }
-                                .accessibilityIdentifier("RectangleTypeMenu")
-                                Text(viewModel.rectangleInstruction).font(.caption)
-                                if viewModel.hasPendingRectangle {
-                                    Button("Cancel Rectangle") { viewModel.clearRectanglePlacement() }
-                                        .accessibilityIdentifier("CancelRectangle")
-                                }
-                            }
-                            .padding(10)
-                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-                        }
-                        statusPill(icon: "pencil.and.outline", text: sketchStatusText(viewModel)) {
-                            sketchStateChip(viewModel)
-                            // Shown when the camera drifted >10° off head-on.
-                            if viewModel.lookAtSketchAvailable {
-                                Button("Look at Sketch") {
-                                    viewModel.lookAtSketch()
-                                }
-                                .controlSize(.small)
-                                .accessibilityIdentifier("LookAtSketch")
-                            }
-                            if viewModel.isPickingSymmetryAxis {
-                                Button("Cancel Symmetry") { viewModel.cancelSymmetryAxisPick() }
-                                    .accessibilityIdentifier("CancelSymmetry")
-                            }
-                            Button("Exit Sketching") {
-                                viewModel.finishSketch()
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                        }
-                    }
-                } else if case .pickingSketchPlane = viewModel.mode {
-                    statusPill(
-                        icon: "square.3.layers.3d",
-                        text: "Choose a sketch plane"
-                    ) {
-                        Button("Cancel") {
-                            viewModel.cancelPlanePicking()
-                        }
-                        .controlSize(.small)
-                        .keyboardShortcut(.cancelAction)
-                    }
-                } else if case .pickingSectionPlane = viewModel.mode {
-                    statusPill(
-                        icon: "square.split.diagonal.2x2",
-                        text: "Choose a section plane"
-                    ) {
-                        Button("Cancel") {
-                            viewModel.cancelSectionPlanePick()
-                        }
-                        .controlSize(.small)
-                        .keyboardShortcut(.cancelAction)
-                    }
-                } else if case .pickingImagePlane = viewModel.mode {
-                    statusPill(
-                        icon: "photo",
-                        text: "Tap a plane for the image"
-                    ) {
-                        Button("Cancel") {
-                            viewModel.cancelImagePlanePick()
-                        }
-                        .controlSize(.small)
-                        .keyboardShortcut(.cancelAction)
-                    }
-                } else if case .pickingBooleanTool(let kind, _) = viewModel.mode {
-                    statusPill(
-                        icon: "square.on.square",
-                        text: "Tap the second body to \(kind.rawValue)"
-                    ) {
-                        Button("Cancel") {
-                            viewModel.cancelBooleanPicking()
-                        }
-                        .controlSize(.small)
-                        .keyboardShortcut(.cancelAction)
-                    }
-                } else if case .pickingFeatureBody = viewModel.mode {
-                    statusPill(
-                        icon: "cube",
-                        text: viewModel.featureBodyPickPrompt ?? "Tap the body"
-                    ) {
-                        Button("Cancel") {
-                            viewModel.cancelFeatureBodyPick()
-                        }
-                        .controlSize(.small)
-                        .keyboardShortcut(.cancelAction)
-                    }
-                } else if case .pickingFeatureFace = viewModel.mode {
-                    statusPill(
-                        icon: "square.on.square.dashed",
-                        text: viewModel.featureFacePickPrompt ?? "Tap the face"
-                    ) {
-                        Button("Cancel") {
-                            viewModel.cancelFeatureFacePick()
-                        }
-                        .controlSize(.small)
-                        .keyboardShortcut(.cancelAction)
-                    }
-                } else if case .pickingFeatureProfile = viewModel.mode {
-                    statusPill(
-                        icon: "pencil.and.outline",
-                        text: viewModel.featureProfilePickPrompt ?? "Tap the profile"
-                    ) {
-                        Button("Cancel") {
-                            viewModel.cancelFeatureProfilePick()
-                        }
-                        .controlSize(.small)
-                        .keyboardShortcut(.cancelAction)
-                    }
-                } else if case .pickingRevolveAxis = viewModel.mode {
-                    statusPill(
-                        icon: "arrow.triangle.2.circlepath",
-                        text: "Tap a sketch line to set the revolve axis"
-                    ) {
-                        Button("Cancel") {
-                            viewModel.cancelRevolveAxisPick()
-                        }
-                        .controlSize(.small)
-                        .keyboardShortcut(.cancelAction)
-                    }
-                } else if case .pickingSweepPath = viewModel.mode {
-                    // Pill mirrors the sweep bar's segment count (plan §B1).
-                    let count = viewModel.toolContext?.sweepPathEntityIDs.count ?? 0
-                    statusPill(
-                        icon: "point.topleft.down.to.point.bottomright.curvepath",
-                        text: count == 0
-                            ? "Tap sketch lines to build the sweep path"
-                            : "Sweep path: \(count) segment\(count == 1 ? "" : "s") chained"
-                    ) {
-                        Button("Cancel") {
-                            viewModel.cancelSweepPathPick()
-                        }
-                        .controlSize(.small)
-                        .keyboardShortcut(.cancelAction)
-                    }
-                } else if case .pickingLoftProfiles = viewModel.mode {
-                    // Pill mirrors the loft bar's section count (plan §B2).
-                    let count = viewModel.toolContext?.loftProfiles.count ?? 0
-                    statusPill(
-                        icon: "square.stack.3d.up",
-                        text: count < 2
-                            ? "Tap profile fills to add loft sections"
-                            : "Loft: \(count) sections in tap order"
-                    ) {
-                        Button("Cancel") {
-                            viewModel.cancelLoftProfilePick()
-                        }
-                        .controlSize(.small)
-                        .keyboardShortcut(.cancelAction)
-                    }
-                } else if case .pickingSplitCutter = viewModel.mode {
-                    statusPill(
-                        icon: "square.split.1x2",
-                        text: "Tap a plane or profile to split"
-                    ) {
-                        Button("Cancel") {
-                            viewModel.cancelSplitCutterPick()
-                        }
-                        .controlSize(.small)
-                        .keyboardShortcut(.cancelAction)
-                    }
-                } else if case .patterning = viewModel.mode {
-                    statusPill(
-                        icon: "square.grid.3x3",
-                        text: "Set pattern options below, then Apply"
-                    ) {
-                        Button("Cancel") {
-                            viewModel.cancelPattern()
-                        }
-                        .controlSize(.small)
-                        .keyboardShortcut(.cancelAction)
-                    }
-                } else if case .rotatingAroundAxis = viewModel.mode {
-                    statusPill(
-                        icon: "arrow.clockwise",
-                        text: viewModel.rotateAxisState?.hasAxis == true
-                            ? "Drag to rotate, or type an angle"
-                            : "Tap a sketch line, or pick a world axis"
-                    ) {
-                        if viewModel.rotateAxisState?.hasAxis != true {
-                            Button("X") { viewModel.setRotateWorldAxis(.x) }
-                                .controlSize(.small)
-                                .accessibilityIdentifier("RotateAxisX")
-                            Button("Y") { viewModel.setRotateWorldAxis(.y) }
-                                .controlSize(.small)
-                                .accessibilityIdentifier("RotateAxisY")
-                            Button("Z") { viewModel.setRotateWorldAxis(.z) }
-                                .controlSize(.small)
-                                .accessibilityIdentifier("RotateAxisZ")
-                        }
-                        Button("Cancel") {
-                            viewModel.cancelRotateAxis()
-                        }
-                        .controlSize(.small)
-                        .keyboardShortcut(.cancelAction)
-                    }
-                } else if case .translating = viewModel.mode {
-                    statusPill(
-                        icon: "arrow.right.to.line",
-                        text: viewModel.transformPickPoints.isEmpty
-                            ? "Tap the source point"
-                            : "Tap the destination point"
-                    ) {
-                        Button("Cancel") {
-                            viewModel.cancelTranslate()
-                        }
-                        .controlSize(.small)
-                        .keyboardShortcut(.cancelAction)
-                    }
-                } else if case .aligning = viewModel.mode {
-                    statusPill(
-                        icon: "point.3.connected.trianglepath.dotted",
-                        text: viewModel.transformPickPoints.isEmpty
-                            ? "Tap a point on the body to move"
-                            : "Tap the destination point"
-                    ) {
-                        Button("Cancel") {
-                            viewModel.cancelAlign()
-                        }
-                        .controlSize(.small)
-                        .keyboardShortcut(.cancelAction)
-                    }
-                } else if case .measuring = viewModel.mode {
-                    measurePill(viewModel)
-                } else if case .faceSelected = viewModel.mode {
-                    statusPill(
-                        icon: viewModel.notice != nil
-                            ? "exclamationmark.circle.fill"
-                            : "square.3.layers.3d.top.filled",
-                        // A refusal (e.g. Move on a curved face) takes over the
-                        // pill so the reason lands where the user is looking.
-                        text: viewModel.notice ?? (viewModel.faceMoveActive
-                            ? "Move face — drag to shear the solid"
-                            : viewModel.faceScaleActive
-                                ? "Scale face — drag to taper the solid"
-                                : viewModel.faceRotateActive
-                                    ? "Rotate face — drag a ring to tilt the solid"
-                                    : viewModel.toolContext?.curvedRegion == true
-                                        ? "Curved face — no push/pull or transform"
-                                        : "Face selected — drag it to push or pull")
-                    ) {
-                        Button("Done") {
-                            viewModel.commitTool()
-                        }
-                        .controlSize(.small)
-                    }
-                }
+                topStatusPillsOverlay(viewModel)
             }
             // Transient explanation (e.g. a tool refusing a curved face). Its OWN
             // overlay, pushed below the status pill — sharing the pill's overlay
@@ -1556,188 +1657,7 @@ struct EditorView: View {
                 }
             }
             .toolbar {
-                ToolbarItemGroup(placement: .primaryAction) {
-                    Button {
-                        viewModel.undo()
-                    } label: {
-                        ZStack {
-                            Color.clear
-                            Image(systemName: "arrow.uturn.backward")
-                        }
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                        .accessibilityLabel("Undo")
-                    }
-                    .disabled(!viewModel.session.undoStack.canUndo && !viewModel.hasPendingRectangle)
-                    // Distinct from the software keyboard's own "Undo": with
-                    // only a label to match on, `app.buttons["Undo"]` found two
-                    // elements and every single-element query threw.
-                    .accessibilityIdentifier("UndoButton")
-
-                    Button {
-                        viewModel.redo()
-                    } label: {
-                        ZStack {
-                            Color.clear
-                            Image(systemName: "arrow.uturn.forward")
-                        }
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                        .accessibilityLabel("Redo")
-                    }
-                    .disabled(!viewModel.session.undoStack.canRedo)
-                    .accessibilityIdentifier("RedoButton")
-
-                    Button {
-                        viewModel.fitView()
-                    } label: {
-                        Label("Fit View", systemImage: "arrow.up.left.and.arrow.down.right")
-                    }
-
-                    // Views popover (spec §7.3): standard views + projection,
-                    // plus Display modes / Isolate / Section (spec §16).
-                    Menu {
-                        ForEach(StandardView.allCases) { standard in
-                            Button(standard.rawValue) {
-                                viewModel.applyStandardView(standard)
-                            }
-                        }
-                        Divider()
-                        Toggle("Orthographic", isOn: Binding(
-                            get: { viewModel.orthographicEnabled },
-                            set: { viewModel.setOrthographic($0) }
-                        ))
-                        Divider()
-                        // Display modes (spec §16.4); the submenu label names
-                        // the active shader.
-                        Menu {
-                            Picker("Display", selection: Binding(
-                                get: { viewModel.displayMode },
-                                set: { viewModel.displayMode = $0 }
-                            )) {
-                                ForEach(DisplayMode.allCases, id: \.self) { mode in
-                                    Text(mode.displayLabel).tag(mode)
-                                }
-                            }
-                            Divider()
-                            Toggle("Show Hidden Edges", isOn: Binding(
-                                get: { viewModel.showHiddenEdges },
-                                set: { viewModel.showHiddenEdges = $0 }
-                            ))
-                        } label: {
-                            Label(
-                                "Display: \(viewModel.displayMode.displayLabel)",
-                                systemImage: "cube.transparent"
-                            )
-                        }
-                        // Ground blob shadows (visualization v1, plan §B15).
-                        Toggle("Ground Shadow", isOn: Binding(
-                            get: { viewModel.groundShadowEnabled },
-                            set: { viewModel.groundShadowEnabled = $0 }
-                        ))
-                        // Isolate (spec §16.2): hide everything but the
-                        // selection; exiting restores.
-                        if viewModel.isIsolateActive {
-                            Button("Exit Isolate") {
-                                viewModel.exitIsolate()
-                            }
-                        } else {
-                            Button("Isolate") {
-                                viewModel.enterIsolate()
-                            }
-                            .disabled(viewModel.selection.isEmpty)
-                        }
-                        // Section View (spec §16.1).
-                        if viewModel.sectionState != nil {
-                            Button("Flip Section") {
-                                viewModel.flipSection()
-                            }
-                            Button("Section Off") {
-                                viewModel.endSection()
-                            }
-                        } else {
-                            Button("Section") {
-                                viewModel.beginSectionPlanePick()
-                            }
-                        }
-                    } label: {
-                        Label("Views", systemImage: "square.stack.3d.up")
-                    }
-                    .accessibilityIdentifier("ViewsMenu")
-
-                    Button {
-                        viewModel.showHistoryPanel.toggle()
-                    } label: {
-                        Label("History", systemImage: "clock.arrow.circlepath")
-                    }
-                    .accessibilityIdentifier("HistoryButton")
-
-                    Button {
-                        viewModel.showVariablesPanel.toggle()
-                    } label: {
-                        Label("Variables", systemImage: "function")
-                    }
-                    .accessibilityIdentifier("VariablesButton")
-
-                    Button {
-                        showItemsPanel.toggle()
-                    } label: {
-                        Label("Items", systemImage: "sidebar.trailing")
-                    }
-                    .accessibilityIdentifier("ItemsButton")
-
-                    importMenu(viewModel)
-
-                    exportMenu(viewModel)
-
-                    // Command Search (spec §8.4). A toolbar button, not just
-                    // the X / ⌘F chords: without one the launcher would be
-                    // unreachable on a touch-only iPad, which is most of them.
-                    Button {
-                        viewModel.openCommandSearch()
-                    } label: {
-                        Label("Command Search", systemImage: "magnifyingglass")
-                    }
-                    .accessibilityIdentifier("CommandSearchButton")
-
-                    // Report a Bug: form + optional .os3d attachment of this
-                    // design, sent to Firestore (`BugReporting.swift`).
-                    Button {
-                        showBugReport = true
-                    } label: {
-                        Label("Report a Bug", systemImage: "ladybug")
-                    }
-                    .accessibilityIdentifier("BugReportButton")
-
-                    Button {
-                        showSettings = true
-                    } label: {
-                        // One shape for both places this button can end up.
-                        //
-                        // In the bar: a custom 44pt clear surface. As a
-                        // `Label`, the bar renders a native 41.5pt item, and
-                        // a tap at its exact centre missed while ±9pt opened
-                        // (6c8ffaf, and again 2026-09-16; mechanism
-                        // unconfirmed). testSettingsCenterTargetOpensInBothOrientations
-                        // guards it.
-                        //
-                        // In the "…" overflow: whenever the bar is too narrow
-                        // (an iPhone in portrait, but also an iPad mini in
-                        // portrait at REGULAR width), each row is built from
-                        // a `Text` in the label. `.accessibilityLabel` does not
-                        // count; without the hidden `Text` the menu silently
-                        // dropped Settings, its only route (gotcha 58).
-                        ZStack {
-                            Color.clear
-                            Image(systemName: "gearshape")
-                            Text("Settings").opacity(0).frame(width: 0)
-                        }
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                        .accessibilityLabel("Settings")
-                    }
-                    .accessibilityIdentifier("SettingsButton")
-                }
+                editorToolbar(viewModel)
             }
             .sheet(isPresented: $showSettings) {
                 SettingsView(settings: AppSettings.shared)
@@ -1792,10 +1712,8 @@ struct EditorView: View {
         }
     }
 
-    @ViewBuilder
-    private func editorContent(_ viewModel: EditorViewModel) -> some View {
-        viewportChrome(viewModel)
-            // ONE importer for every Import-menu entry (see `ImportRequest`).
+    private func withImportExportModifiers<Content: View>(_ content: Content, viewModel: EditorViewModel) -> some View {
+        content
             .fileImporter(
                 isPresented: $showImporter,
                 allowedContentTypes: importRequest.contentTypes
@@ -1808,20 +1726,6 @@ struct EditorView: View {
                         MeshImportKit.scaled(probe.parts, by: unit.millimetresPerUnit),
                         fileName: probe.fileName)
                 }
-            }
-            .onAppear {
-                // DEBUG hook for the UI suite: OS3D_DEBUG_IMPORT_MESH=<path>
-                // opens the units prompt for that file as if it had been
-                // picked — the system file picker can't be driven by XCUITest.
-                #if DEBUG
-                guard !didHandleDebugImport else { return }
-                didHandleDebugImport = true
-                if let path = ProcessInfo.processInfo.environment["OS3D_DEBUG_IMPORT_MESH"],
-                   let data = try? Data(contentsOf: URL(fileURLWithPath: path)) {
-                    pendingMeshImport = viewModel.probeMesh(
-                        data: data, fileName: (path as NSString).lastPathComponent)
-                }
-                #endif
             }
             .photosPicker(
                 isPresented: $showPhotoPicker,
@@ -1862,8 +1766,6 @@ struct EditorView: View {
             .sheet(
                 item: $meshExportFormat,
                 onDismiss: {
-                    // Promote whichever payload the sheet staged; the
-                    // exporter can only present after the sheet is gone.
                     if let staged = pendingExport {
                         pendingExport = nil
                         exportDocument = staged
@@ -1889,6 +1791,24 @@ struct EditorView: View {
                     viewModel.errorMessage = "Export failed — please try again."
                 }
             }
+            .fileExporter(
+                isPresented: Binding(
+                    get: { exportDocument != nil },
+                    set: { if !$0 { exportDocument = nil } }
+                ),
+                document: exportDocument,
+                contentType: exportDocument?.contentType ?? .data,
+                defaultFilename: "\(project.name).\(exportDocument?.fileExtension ?? "stl")"
+            ) { result in
+                exportDocument = nil
+                if case .failure = result {
+                    viewModel.errorMessage = "Export failed — please try again."
+                }
+            }
+    }
+
+    private func withToolSheetsAndAlerts<Content: View>(_ content: Content, viewModel: EditorViewModel) -> some View {
+        content
             .sheet(isPresented: Binding(
                 get: { arPreviewURL != nil },
                 set: { if !$0 { arPreviewURL = nil } }
@@ -1910,8 +1830,6 @@ struct EditorView: View {
                 get: { viewModel.showMaterialSheet },
                 set: { viewModel.showMaterialSheet = $0 }
             )) {
-                // Body material assignment (plan §B15): one undoable
-                // SetMaterialCommand over the whole selection.
                 MaterialSheet(initial: viewModel.materialForSelection) { spec in
                     viewModel.applyMaterial(spec)
                 }
@@ -1920,22 +1838,7 @@ struct EditorView: View {
                 get: { viewModel.showConstraintSettings },
                 set: { viewModel.showConstraintSettings = $0 }
             )) {
-                // Auto-constrain inference settings (plan §B, contract D).
                 ConstraintSettingsView(viewModel: viewModel)
-            }
-            .fileExporter(
-                isPresented: Binding(
-                    get: { exportDocument != nil },
-                    set: { if !$0 { exportDocument = nil } }
-                ),
-                document: exportDocument,
-                contentType: exportDocument?.contentType ?? .data,
-                defaultFilename: "\(project.name).\(exportDocument?.fileExtension ?? "stl")"
-            ) { result in
-                exportDocument = nil
-                if case .failure = result {
-                    viewModel.errorMessage = "Export failed — please try again."
-                }
             }
             .confirmationDialog(
                 "Select Through",
@@ -1945,8 +1848,6 @@ struct EditorView: View {
                 ),
                 titleVisibility: .visible
             ) {
-                // Long-press hit list, front→back (plan §B13, spec §8.3):
-                // choosing an occluded body selects it (Select Through).
                 ForEach(viewModel.selectThroughCandidates ?? []) { candidate in
                     Button(candidate.name) {
                         viewModel.chooseSelectThrough(candidate)
@@ -1963,8 +1864,6 @@ struct EditorView: View {
                     set: { viewModel.showMakeSymbolPrompt = $0 }
                 )
             ) {
-                // Name prompt (plan §B16): the selected sketch entities
-                // become a reusable symbol in the document.
                 TextField("Name", text: $symbolNameDraft)
                 Button("Create") {
                     viewModel.makeSymbol(named: symbolNameDraft)
@@ -1988,12 +1887,31 @@ struct EditorView: View {
                 Text(viewModel.errorMessage ?? "")
             }
             .onChange(of: viewModel.session.lastSaveError) { _, saveError in
-                // A failed SwiftData save means recent work isn't reaching
-                // disk — the one storage problem worth an alert mid-session.
                 if let saveError {
                     viewModel.errorMessage =
                         "Saving failed — recent changes may not be stored. (\(saveError))"
                 }
+            }
+    }
+
+    @ViewBuilder
+    private func editorContent(_ viewModel: EditorViewModel) -> some View {
+        let base = viewportChrome(viewModel)
+        let withImports = withImportExportModifiers(base, viewModel: viewModel)
+        withToolSheetsAndAlerts(withImports, viewModel: viewModel)
+            .onAppear {
+                // DEBUG hook for the UI suite: OS3D_DEBUG_IMPORT_MESH=<path>
+                // opens the units prompt for that file as if it had been
+                // picked — the system file picker can't be driven by XCUITest.
+                #if DEBUG
+                guard !didHandleDebugImport else { return }
+                didHandleDebugImport = true
+                if let path = ProcessInfo.processInfo.environment["OS3D_DEBUG_IMPORT_MESH"],
+                   let data = try? Data(contentsOf: URL(fileURLWithPath: path)) {
+                    pendingMeshImport = viewModel.probeMesh(
+                        data: data, fileName: (path as NSString).lastPathComponent)
+                }
+                #endif
             }
     }
 }
