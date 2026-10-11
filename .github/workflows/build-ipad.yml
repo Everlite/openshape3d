@@ -33,8 +33,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             AD_HOC_CODE_SIGNING_ALLOWED=YES \
-            SWIFT_STRICT_CONCURRENCY=minimal \
-            OTHER_SWIFT_FLAGS="-enable-experimental-feature IsolatedDeinit"
+            SWIFT_STRICT_CONCURRENCY=minimal
 
       - name: Package IPA
         run: |
