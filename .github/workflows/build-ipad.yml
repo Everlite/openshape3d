@@ -20,23 +20,26 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_16.4.app || sudo xcode-select -s /Applications/Xcode.app
           xcodebuild -version
 
-      - name: Build and Archive
+      - name: Build App
         run: |
-          xcodebuild archive \
+          xcodebuild build \
             -project openshape3d.xcodeproj \
             -scheme openshape3d \
-            -configuration Release \
+            -configuration Debug \
             -destination 'generic/platform=iOS' \
-            -archivePath build/openshape3d.xcarchive \
+            -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            AD_HOC_CODE_SIGNING_ALLOWED=YES
+            AD_HOC_CODE_SIGNING_ALLOWED=YES \
+            SWIFT_STRICT_CONCURRENCY=minimal
 
       - name: Package IPA
         run: |
           mkdir -p build/Payload
-          cp -R build/openshape3d.xcarchive/Products/Applications/*.app build/Payload/
+          APP_PATH=$(find build/DerivedData -name "openshape3d.app" -type d | head -n 1)
+          echo "Found app at: $APP_PATH"
+          cp -R "$APP_PATH" build/Payload/
           cd build
           zip -qr openshape3d.ipa Payload
 
