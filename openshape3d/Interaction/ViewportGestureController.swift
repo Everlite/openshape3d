@@ -36,6 +36,7 @@ protocol ViewportGestureDelegate: AnyObject {
     func gesturePencilDoubleTapped()
 }
 
+@MainActor
 final class ViewportGestureController: NSObject {
     weak var view: MTKView?
     weak var renderer: Renderer?

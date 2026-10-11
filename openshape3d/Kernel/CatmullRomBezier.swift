@@ -77,8 +77,14 @@ nonisolated enum CatmullRomBezier {
                 out.append(.line(p1, p2))
                 continue
             }
-            let d1 = ((p1 - p0) / (t1 - t0) * (t2 - t1) + (p2 - p1) / (t2 - t1) * (t1 - t0)) / (t2 - t0)
-            let d2 = ((p2 - p1) / (t2 - t1) * (t3 - t2) + (p3 - p2) / (t3 - t2) * (t2 - t1)) / (t3 - t1)
+            let delta1 = (p1 - p0) / (t1 - t0) * (t2 - t1)
+            let delta2 = (p2 - p1) / (t2 - t1) * (t1 - t0)
+            let d1 = (delta1 + delta2) / (t2 - t0)
+
+            let delta3 = (p2 - p1) / (t2 - t1) * (t3 - t2)
+            let delta4 = (p3 - p2) / (t3 - t2) * (t2 - t1)
+            let d2 = (delta3 + delta4) / (t3 - t1)
+
             let h = t2 - t1
             out.append(Span(p0: p1, p1: p1 + d1 * (h / 3), p2: p2 - d2 * (h / 3), p3: p2))
         }

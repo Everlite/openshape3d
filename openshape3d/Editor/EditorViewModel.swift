@@ -11476,8 +11476,8 @@ final class EditorViewModel {
         let devVertical = atan2(abs(d.x), abs(d.y))
         return constraints.filter { inferred in
             switch inferred.kind {
-            case .horizontal: axisDistanceTolerance.map { AutoConstraintEngine.withinAxisDistance(d.y, tolerance: $0) } ?? (devHorizontal <= tol)
-            case .vertical: axisDistanceTolerance.map { AutoConstraintEngine.withinAxisDistance(d.x, tolerance: $0) } ?? (devVertical <= tol)
+            case .horizontal: axisDistanceTolerance.map { AutoConstraintEngine.withinAxisDistance(d.y, tolerance: $0) } ?? (devHorizontal <= tol.radians)
+            case .vertical: axisDistanceTolerance.map { AutoConstraintEngine.withinAxisDistance(d.x, tolerance: $0) } ?? (devVertical <= tol.radians)
             default: true
             }
         }

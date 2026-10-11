@@ -280,6 +280,7 @@ struct MoveGizmoOverlay: View {
 }
 
 /// Projects gizmo-local offsets (unit-scale, origin at zero) to screen points.
+@MainActor
 private struct ProjectionContext {
     let origin: SIMD3<Float>
     let scale: Float
