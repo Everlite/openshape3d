@@ -316,6 +316,6 @@ final class AppSettings {
     // in the current toolchain — deterministically crashing any test that lets
     // an `AppSettings` instance go out of scope (malloc "pointer being freed
     // was not allocated"). There's no teardown work to do here, so opt the
-    // deinit out of actor isolation to skip the executor hop entirely.
-    nonisolated deinit {}
+    deinit {}
 }
+
