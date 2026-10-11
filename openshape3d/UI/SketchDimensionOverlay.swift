@@ -160,280 +160,340 @@ struct SketchDimensionOverlay: View {
            let start = project(label.worldStart),
            let end = project(label.worldEnd) {
             let arc = arcLeader(label)
-            let isLinear = label.isStandaloneLineLength || label.isRectangleSize
-            let interior = label.worldRectangleCenter.flatMap(project)
-            let previewAnchor = diameterDragPreviews[label.id] ?? label.worldLinearLabelAnchor.flatMap(project)
-            let draggedLeader: CGFloat?
-            if isLinear, let anchorVal = previewAnchor {
-                draggedLeader = SketchLinearDimensionLayout.leaderOffset(start: start, end: end, textAnchor: anchorVal, awayFrom: interior)
-            } else {
-                draggedLeader = nil
-            }
+            let isLinear: Bool = label.isStandaloneLineLength || label.isRectangleSize
+            let interior: CGPoint? = label.worldRectangleCenter.flatMap(project)
+            let previewAnchor: CGPoint? = diameterDragPreviews[label.id] ?? label.worldLinearLabelAnchor.flatMap(project)
+            let draggedLeader: CGFloat? = (isLinear && previewAnchor != nil) ? SketchLinearDimensionLayout.leaderOffset(start: start, end: end, textAnchor: previewAnchor!, awayFrom: interior) : nil
             let defaultOffset: CGFloat = label.isProjectedLineLength ? 0 : (label.isRectangleSize ? 100 : 60)
-            let linear: SketchLinearDimensionLayout.Layout?
-            if isLinear {
-                linear = SketchLinearDimensionLayout.make(start: start, end: end, leaderOffset: draggedLeader ?? defaultOffset, awayFrom: interior)
-            } else {
-                linear = nil
-            }
+            let linear: SketchLinearDimensionLayout.Layout? = isLinear ? SketchLinearDimensionLayout.make(start: start, end: end, leaderOffset: draggedLeader ?? defaultOffset, awayFrom: interior) : nil
 
             let isCompactRadius: Bool = label.isCircleRadius && ((label.dimensionID != nil && (label.hasCircleRadiusDirection || viewModel.mode.sketchTool == .circle)) || (viewModel.mode.sketchTool == .circle && viewModel.selectedCircleCenterID == label.refs.first?.entityID))
             let radial = label.isArcRadius ? radiusLeader(start, end, text: label.text, compact: isCompactRadius, in: size) : nil
 
-            let manualAnchor = diameterDragPreviews[label.id] ?? label.worldDiameterLabelAnchor.flatMap(project)
-            let diameter = (label.kind == .diameter) ? diameterLayout(start, end, anchor: anchor, text: label.text, sketchID: label.sketchID, manualAnchor: manualAnchor, in: size) : nil
+            let manualAnchor: CGPoint? = diameterDragPreviews[label.id] ?? label.worldDiameterLabelAnchor.flatMap(project)
+            let diameter: SketchDiameterDimensionLayout? = (label.kind == .diameter) ? diameterLayout(start, end, anchor: anchor, text: label.text, sketchID: label.sketchID, manualAnchor: manualAnchor, in: size) : nil
 
-            if let arc {
-                Path { path in
-                    path.addLines(arc.points)
-                    path.move(to: start)
-                    path.addLine(to: arc.points[0])
-                    path.move(to: end)
-                    path.addLine(to: arc.points[arc.points.count - 1])
-                }
-                .stroke(Color.black, lineWidth: 1)
-                .allowsHitTesting(false)
-                Path { path in
-                    addArrow(to: &path, tip: arc.points[0], toward: arc.points[1])
-                    addArrow(to: &path, tip: arc.points[arc.points.count - 1],
-                             toward: arc.points[arc.points.count - 2])
-                }
-                .fill(Color.black)
-                .allowsHitTesting(false)
-            } else if let radial {
-                Path { path in
-                    path.move(to: start)
-                    path.addLine(to: radial.tail)
-                }
-                .stroke(Color.black, lineWidth: 1)
-                .allowsHitTesting(false)
-                Path { path in
-                    addArrow(to: &path, tip: end, toward: radial.tail == end ? start : radial.tail)
-                }
-                .fill(Color.black)
-                .allowsHitTesting(false)
-            } else if let diameter {
-                Path { path in
-                    path.move(to: diameter.start)
-                    path.addLine(to: diameter.tail)
-                }
-                .stroke(Color.black, lineWidth: 1)
-                .allowsHitTesting(false)
-                Path { path in
-                    let outside = diameter.tail != diameter.end
-                    let startBody = outside
-                        ? CGPoint(x: 2 * diameter.start.x - diameter.end.x,
-                                  y: 2 * diameter.start.y - diameter.end.y) : diameter.end
-                    let endBody = outside ? diameter.tail : diameter.start
-                    addArrow(to: &path, tip: diameter.start, toward: startBody)
-                    addArrow(to: &path, tip: diameter.end, toward: endBody)
-                }
-                .fill(Color.black)
-                .allowsHitTesting(false)
-            } else if let linear {
-                Path { path in
-                    path.move(to: label.worldLineStart.flatMap(project) ?? start)
-                    path.addLine(to: linear.start)
-                    path.addLine(to: linear.end)
-                    path.addLine(to: label.worldLineEnd.flatMap(project) ?? end)
-                }
-                .stroke(Color.black, lineWidth: 1)
-                .allowsHitTesting(false)
-                Path { path in
-                    addArrow(to: &path, tip: linear.start, toward: linear.end)
-                    addArrow(to: &path, tip: linear.end, toward: linear.start)
-                }
-                .fill(Color.black)
-                .allowsHitTesting(false)
-            } else if !label.isPolygonSideCount {
-                Path { path in
-                    path.move(to: start)
-                    path.addLine(to: end)
-                }
-                .stroke(Color.blue.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                .allowsHitTesting(false)
+            leaderLinesView(label: label, start: start, end: end, arc: arc, radial: radial, diameter: diameter, linear: linear)
+
+            labelBadgeAndActions(label: label, start: start, end: end, anchor: anchor, arc: arc, radial: radial, diameter: diameter, linear: linear, in: size)
+        }
+    }
+
+    @ViewBuilder
+    private func leaderLinesView(
+        label: EditorViewModel.SketchDimensionLabel,
+        start: CGPoint,
+        end: CGPoint,
+        arc: (points: [CGPoint], anchor: CGPoint, rotation: Double)?,
+        radial: (tail: CGPoint, anchor: CGPoint, rotation: Double)?,
+        diameter: SketchDiameterDimensionLayout?,
+        linear: SketchLinearDimensionLayout.Layout?
+    ) -> some View {
+        if let arc {
+            Path { path in
+                path.addLines(arc.points)
+                path.move(to: start)
+                path.addLine(to: arc.points[0])
+                path.move(to: end)
+                path.addLine(to: arc.points[arc.points.count - 1])
             }
+            .stroke(Color.black, lineWidth: 1)
+            .allowsHitTesting(false)
+            Path { path in
+                addArrow(to: &path, tip: arc.points[0], toward: arc.points[1])
+                addArrow(to: &path, tip: arc.points[arc.points.count - 1],
+                         toward: arc.points[arc.points.count - 2])
+            }
+            .fill(Color.black)
+            .allowsHitTesting(false)
+        } else if let radial {
+            Path { path in
+                path.move(to: start)
+                path.addLine(to: radial.tail)
+            }
+            .stroke(Color.black, lineWidth: 1)
+            .allowsHitTesting(false)
+            Path { path in
+                addArrow(to: &path, tip: end, toward: radial.tail == end ? start : radial.tail)
+            }
+            .fill(Color.black)
+            .allowsHitTesting(false)
+        } else if let diameter {
+            Path { path in
+                path.move(to: diameter.start)
+                path.addLine(to: diameter.tail)
+            }
+            .stroke(Color.black, lineWidth: 1)
+            .allowsHitTesting(false)
+            Path { path in
+                let outside = diameter.tail != diameter.end
+                let startBody = outside
+                    ? CGPoint(x: 2 * diameter.start.x - diameter.end.x,
+                              y: 2 * diameter.start.y - diameter.end.y) : diameter.end
+                let endBody = outside ? diameter.tail : diameter.start
+                addArrow(to: &path, tip: diameter.start, toward: startBody)
+                addArrow(to: &path, tip: diameter.end, toward: endBody)
+            }
+            .fill(Color.black)
+            .allowsHitTesting(false)
+        } else if let linear {
+            Path { path in
+                path.move(to: label.worldLineStart.flatMap(project) ?? start)
+                path.addLine(to: linear.start)
+                path.addLine(to: linear.end)
+                path.addLine(to: label.worldLineEnd.flatMap(project) ?? end)
+            }
+            .stroke(Color.black, lineWidth: 1)
+            .allowsHitTesting(false)
+            Path { path in
+                addArrow(to: &path, tip: linear.start, toward: linear.end)
+                addArrow(to: &path, tip: linear.end, toward: linear.start)
+            }
+            .fill(Color.black)
+            .allowsHitTesting(false)
+        } else if !label.isPolygonSideCount {
+            Path { path in
+                path.move(to: start)
+                path.addLine(to: end)
+            }
+            .stroke(Color.blue.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+            .allowsHitTesting(false)
+        }
+    }
 
-            let conflicting = label.dimensionID.map {
-                viewModel.sketchConflictAttribution.dimensionIDs.contains($0)
-            } ?? false
-            if viewModel.editingDimension?.labelID == label.id {
-                // Being edited: the leader line above still draws, but the
-                // badge gives way to the field, which `body` positions.
-                EmptyView()
-            } else if let radial, label.isCircleRadius,
-                      !viewModel.sketchTransformActive,
-                      (viewModel.mode.sketchTool == .circle || label.hasCircleRadiusDirection),
-                      let dimensionID = label.dimensionID,
-                      viewModel.selectedDimensionID == dimensionID {
-                HStack(spacing: 0) {
-                    Button { viewModel.beginDimensionEdit(label) } label: {
-                        Text(label.text)
-                            .font(.system(size: 16)).monospacedDigit()
-                            .foregroundStyle(conflicting ? Color.red : Color.black)
-                            .padding(.horizontal, 3).padding(.vertical, 1)
-                            .background(Color.white, in: RoundedRectangle(cornerRadius: 2))
-                            .overlay(RoundedRectangle(cornerRadius: 2).stroke(conflicting ? Color.red : Color.blue, lineWidth: 2))
-                            .frame(minWidth: 44, minHeight: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier(conflicting ? "DimensionLabelConflict" : "DimensionLabel")
-                    Button { viewModel.deleteDimension(dimensionID) } label: {
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 13)).foregroundStyle(Color.black)
-                            .frame(width: 44, height: 44).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Unlock radius")
-                    .accessibilityIdentifier("CircleRadiusDimensionUnlock")
-                }
-                .overlay(alignment: .leading) {
-                    if label.hasExpression {
-                        Text("f(x)").font(.system(size: 13).italic())
-                            .foregroundStyle(Color.gray).offset(x: -25)
-                            .accessibilityHidden(true)
-                    }
-                }
-                .rotationEffect(.radians(radial.rotation))
-                .position(radial.anchor)
-            } else {
-                // Stage-2 conflict attribution: a dimension the solver could
-                // not satisfy paints red — dueling lengths are the archetypal
-                // sketch conflict, and the value badge is where the user
-                // looks first.
-                Button {
-                    viewModel.beginDimensionEdit(label)
-                } label: {
-                    if label.isPolygonSideCount {
-                        Text(label.text)
-                            .font(.system(size: 16))
-                            .monospacedDigit()
-                            .foregroundStyle(Color.black)
-                            .rotationEffect(.radians(atan2(end.y - start.y, end.x - start.x) - .pi / 2))
-                            .frame(minWidth: 44, minHeight: 44)
-                            .contentShape(Rectangle())
-                    } else if let arc {
-                        Text(label.displayValue.formatted(.number.precision(.fractionLength(0...2))) + "°")
-                            .font(.system(size: 16))
-                            .monospacedDigit()
-                            .foregroundStyle(conflicting ? Color.red : Color.black)
-                            .rotationEffect(.radians(arc.rotation))
-                            .frame(minWidth: 44, minHeight: 44)
-                            .contentShape(Rectangle())
-                    } else if let radial {
-                        Text(label.text)
-                            .font(.system(size: 16))
-                            .monospacedDigit()
-                            .foregroundStyle(conflicting ? Color.red : Color.black)
-                            .rotationEffect(.radians(radial.rotation))
-                            .frame(minWidth: 44, minHeight: 44)
-                            .contentShape(Rectangle())
-                    } else if let diameter {
-                        Text(label.text)
-                            .font(.system(size: 16))
-                            .monospacedDigit()
-                            .foregroundStyle(conflicting ? Color.red : Color.black)
-                            .fixedSize()
-                            .rotationEffect(.radians(diameter.rotation))
-                            .frame(width: diameter.targetSize.width, height: diameter.targetSize.height)
-                            .contentShape(DiameterValueHitShape(center: CGPoint(
-                                x: (start.x + end.x) / 2 - diameter.anchor.x + diameter.targetSize.width / 2,
-                                y: (start.y + end.y) / 2 - diameter.anchor.y + diameter.targetSize.height / 2)))
-                    } else if let linear {
-                        let selectedCornerSize = label.isRectangleSize && label.dimensionID != nil &&
-                            viewModel.selectedDimensionID == label.dimensionID &&
-                            viewModel.selectedMigratedRectangleCornerMarker != nil
-                        Text(label.text)
-                            .font(.system(size: 16))
-                            .monospacedDigit()
-                            .foregroundStyle(conflicting ? Color.red : Color.black)
-                            .padding(.horizontal, selectedCornerSize ? 3 : 0)
-                            .padding(.vertical, selectedCornerSize ? 1 : 0)
-                            .background {
-                                if selectedCornerSize {
-                                    RoundedRectangle(cornerRadius: 2).fill(Color.white)
-                                }
-                            }
-                            .overlay {
-                                if selectedCornerSize {
-                                    RoundedRectangle(cornerRadius: 2)
-                                        .stroke(conflicting ? Color.red : Color.blue, lineWidth: 2)
-                                }
-                            }
-                            .rotationEffect(.radians(linear.rotation))
-                            .frame(minWidth: 44, minHeight: 44)
-                            .contentShape(Rectangle())
-                    } else {
+    @ViewBuilder
+    private func labelBadgeAndActions(
+        label: EditorViewModel.SketchDimensionLabel,
+        start: CGPoint,
+        end: CGPoint,
+        anchor: CGPoint,
+        arc: (points: [CGPoint], anchor: CGPoint, rotation: Double)?,
+        radial: (tail: CGPoint, anchor: CGPoint, rotation: Double)?,
+        diameter: SketchDiameterDimensionLayout?,
+        linear: SketchLinearDimensionLayout.Layout?,
+        in size: CGSize
+    ) -> some View {
+        let conflicting: Bool = label.dimensionID.map {
+            viewModel.sketchConflictAttribution.dimensionIDs.contains($0)
+        } ?? false
+        if viewModel.editingDimension?.labelID == label.id {
+            // Being edited: the leader line above still draws, but the
+            // badge gives way to the field, which `body` positions.
+            EmptyView()
+        } else if let radial, label.isCircleRadius,
+                  !viewModel.sketchTransformActive,
+                  (viewModel.mode.sketchTool == .circle || label.hasCircleRadiusDirection),
+                  let dimensionID = label.dimensionID,
+                  viewModel.selectedDimensionID == dimensionID {
+            HStack(spacing: 0) {
+                Button { viewModel.beginDimensionEdit(label) } label: {
                     Text(label.text)
-                        .font(.caption.weight(.semibold))
-                        .monospacedDigit()
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 5))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 5)
-                                .stroke(conflicting ? Color.red
-                                        : label.dimensionID == nil
-                                        ? Color.blue.opacity(0.4) : Color.blue,
-                                        lineWidth: conflicting ? 2 : 1)
-                        )
-                        .foregroundStyle(conflicting ? Color.red
-                                         : label.dimensionID == nil
-                                         ? Color.secondary : Color.blue)
-                        // Keep the visual badge compact but give finger taps
-                        // a real hit region, including its padded corners.
+                        .font(.system(size: 16)).monospacedDigit()
+                        .foregroundStyle(conflicting ? Color.red : Color.black)
+                        .padding(.horizontal, 3).padding(.vertical, 1)
+                        .background(Color.white, in: RoundedRectangle(cornerRadius: 2))
+                        .overlay(RoundedRectangle(cornerRadius: 2).stroke(conflicting ? Color.red : Color.blue, lineWidth: 2))
                         .frame(minWidth: 44, minHeight: 44)
                         .contentShape(Rectangle())
-                    }
-                }
-                .overlay(alignment: .leading) {
-                    if label.hasExpression {
-                        Text("f(x)")
-                            .font(.system(size: 13).italic())
-                            // Canvas stays light even when app chrome is dark.
-                            .foregroundStyle(Color.gray)
-                            .offset(x: -25)
-                            .accessibilityHidden(true)
-                            .allowsHitTesting(false)
-                    }
                 }
                 .buttonStyle(.plain)
-                .highPriorityGesture(diameterDrag(label, anchor: diameter?.anchor ?? linear?.anchor ?? anchor),
-                    including: diameter != nil || linear != nil ? .all : .none)
-                .position(label.isPolygonSideCount
-                    ? polygonCountAnchor(start: start, end: end, in: size)
-                    : arc?.anchor ?? radial?.anchor ?? diameter?.anchor
-                        ?? linear.map { badgeWithinCanvas($0.anchor, in: size) }
-                        ?? clearOfGizmo(anchor, along: start, end))
-                .accessibilityIdentifier(
-                    conflicting ? "DimensionLabelConflict" : "DimensionLabel")
-                if let linear, viewModel.canChooseLineDimensionKind(label) {
-                    let textWidth = (label.text as NSString).size(
-                        withAttributes: [.font: UIFont.monospacedDigitSystemFont(ofSize: 16, weight: .regular)]).width
-                    Menu {
-                        ForEach(viewModel.dimensionKindChoices, id: \.rawValue) { kind in
-                            Button {
-                                viewModel.chooseLineDimensionKind(kind, label: label)
-                            } label: {
-                                Label(kind == .distance ? "Absolute" : kind == .horizontal ? "Horizontal" : "Vertical",
-                                      systemImage: kind == label.kind ? "checkmark" : "")
-                            }
-                            .accessibilityIdentifier("LineDistanceType-" + kind.rawValue)
-                        }
-                    } label: {
-                        Image(systemName: label.kind == .vertical ? "arrow.up.and.down" :
-                                label.kind == .horizontal ? "arrow.left.and.right" : "arrow.up.right.and.arrow.down.left")
-                            .font(.system(size: 13)).foregroundStyle(Color.black)
-                            .frame(width: 44, height: 44).contentShape(Rectangle())
-                    }
-                    .accessibilityLabel("Distance Type")
-                    .accessibilityIdentifier("LineDistanceTypeBadge")
-                    .position(x: linear.anchor.x - cos(linear.rotation) * (textWidth / 2 + 24),
-                              y: linear.anchor.y - sin(linear.rotation) * (textWidth / 2 + 24))
+                .accessibilityIdentifier(conflicting ? "DimensionLabelConflict" : "DimensionLabel")
+                Button { viewModel.deleteDimension(dimensionID) } label: {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 13)).foregroundStyle(Color.black)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Unlock radius")
+                .accessibilityIdentifier("CircleRadiusDimensionUnlock")
+            }
+            .overlay(alignment: .leading) {
+                if label.hasExpression {
+                    Text("f(x)").font(.system(size: 13).italic())
+                        .foregroundStyle(Color.gray).offset(x: -25)
+                        .accessibilityHidden(true)
                 }
             }
+            .rotationEffect(.radians(radial.rotation))
+            .position(radial.anchor)
+        } else {
+            dimensionBadgeButton(label: label, start: start, end: end, anchor: anchor, arc: arc, radial: radial, diameter: diameter, linear: linear, conflicting: conflicting, in: size)
+
+            if let linear, viewModel.canChooseLineDimensionKind(label) {
+                dimensionKindMenu(label: label, linear: linear)
+            }
         }
+    }
+
+    @ViewBuilder
+    private func dimensionBadgeContent(
+        label: EditorViewModel.SketchDimensionLabel,
+        start: CGPoint,
+        end: CGPoint,
+        arc: (points: [CGPoint], anchor: CGPoint, rotation: Double)?,
+        radial: (tail: CGPoint, anchor: CGPoint, rotation: Double)?,
+        diameter: SketchDiameterDimensionLayout?,
+        linear: SketchLinearDimensionLayout.Layout?,
+        conflicting: Bool
+    ) -> some View {
+        if label.isPolygonSideCount {
+            Text(label.text)
+                .font(.system(size: 16))
+                .monospacedDigit()
+                .foregroundStyle(Color.black)
+                .rotationEffect(.radians(atan2(end.y - start.y, end.x - start.x) - .pi / 2))
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        } else if let arc {
+            Text(label.displayValue.formatted(.number.precision(.fractionLength(0...2))) + "°")
+                .font(.system(size: 16))
+                .monospacedDigit()
+                .foregroundStyle(conflicting ? Color.red : Color.black)
+                .rotationEffect(.radians(arc.rotation))
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        } else if let radial {
+            Text(label.text)
+                .font(.system(size: 16))
+                .monospacedDigit()
+                .foregroundStyle(conflicting ? Color.red : Color.black)
+                .rotationEffect(.radians(radial.rotation))
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        } else if let diameter {
+            let centerPoint = CGPoint(
+                x: (start.x + end.x) / 2 - diameter.anchor.x + diameter.targetSize.width / 2,
+                y: (start.y + end.y) / 2 - diameter.anchor.y + diameter.targetSize.height / 2
+            )
+            Text(label.text)
+                .font(.system(size: 16))
+                .monospacedDigit()
+                .foregroundStyle(conflicting ? Color.red : Color.black)
+                .fixedSize()
+                .rotationEffect(.radians(diameter.rotation))
+                .frame(width: diameter.targetSize.width, height: diameter.targetSize.height)
+                .contentShape(DiameterValueHitShape(center: centerPoint))
+        } else if let linear {
+            let selectedCornerSize = label.isRectangleSize && label.dimensionID != nil &&
+                viewModel.selectedDimensionID == label.dimensionID &&
+                viewModel.selectedMigratedRectangleCornerMarker != nil
+            Text(label.text)
+                .font(.system(size: 16))
+                .monospacedDigit()
+                .foregroundStyle(conflicting ? Color.red : Color.black)
+                .padding(.horizontal, selectedCornerSize ? 3 : 0)
+                .padding(.vertical, selectedCornerSize ? 1 : 0)
+                .background {
+                    if selectedCornerSize {
+                        RoundedRectangle(cornerRadius: 2).fill(Color.white)
+                    }
+                }
+                .overlay {
+                    if selectedCornerSize {
+                        RoundedRectangle(cornerRadius: 2)
+                            .stroke(conflicting ? Color.red : Color.blue, lineWidth: 2)
+                    }
+                }
+                .rotationEffect(.radians(linear.rotation))
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        } else {
+            Text(label.text)
+                .font(.caption.weight(.semibold))
+                .monospacedDigit()
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 5))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5)
+                        .stroke(conflicting ? Color.red
+                                : label.dimensionID == nil
+                                ? Color.blue.opacity(0.4) : Color.blue,
+                                lineWidth: conflicting ? 2 : 1)
+                )
+                .foregroundStyle(conflicting ? Color.red
+                                 : label.dimensionID == nil
+                                 ? Color.secondary : Color.blue)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+    }
+
+    @ViewBuilder
+    private func dimensionBadgeButton(
+        label: EditorViewModel.SketchDimensionLabel,
+        start: CGPoint,
+        end: CGPoint,
+        anchor: CGPoint,
+        arc: (points: [CGPoint], anchor: CGPoint, rotation: Double)?,
+        radial: (tail: CGPoint, anchor: CGPoint, rotation: Double)?,
+        diameter: SketchDiameterDimensionLayout?,
+        linear: SketchLinearDimensionLayout.Layout?,
+        conflicting: Bool,
+        in size: CGSize
+    ) -> some View {
+        let badgePosition: CGPoint = {
+            if label.isPolygonSideCount {
+                return polygonCountAnchor(start: start, end: end, in: size)
+            } else if let arcAnchor = arc?.anchor {
+                return arcAnchor
+            } else if let radialAnchor = radial?.anchor {
+                return radialAnchor
+            } else if let diameterAnchor = diameter?.anchor {
+                return diameterAnchor
+            } else if let linear {
+                return badgeWithinCanvas(linear.anchor, in: size)
+            } else {
+                return clearOfGizmo(anchor, along: start, end)
+            }
+        }()
+
+        Button {
+            viewModel.beginDimensionEdit(label)
+        } label: {
+            dimensionBadgeContent(label: label, start: start, end: end, arc: arc, radial: radial, diameter: diameter, linear: linear, conflicting: conflicting)
+        }
+        .overlay(alignment: .leading) {
+            if label.hasExpression {
+                Text("f(x)")
+                    .font(.system(size: 13).italic())
+                    .foregroundStyle(Color.gray)
+                    .offset(x: -25)
+                    .accessibilityHidden(true)
+                    .allowsHitTesting(false)
+            }
+        }
+        .buttonStyle(.plain)
+        .highPriorityGesture(diameterDrag(label, anchor: diameter?.anchor ?? linear?.anchor ?? anchor),
+            including: diameter != nil || linear != nil ? .all : .none)
+        .position(badgePosition)
+        .accessibilityIdentifier(conflicting ? "DimensionLabelConflict" : "DimensionLabel")
+    }
+
+    @ViewBuilder
+    private func dimensionKindMenu(label: EditorViewModel.SketchDimensionLabel, linear: SketchLinearDimensionLayout.Layout) -> some View {
+        let textWidth = (label.text as NSString).size(
+            withAttributes: [.font: UIFont.monospacedDigitSystemFont(ofSize: 16, weight: .regular)]).width
+        Menu {
+            ForEach(viewModel.dimensionKindChoices, id: \.rawValue) { kind in
+                Button {
+                    viewModel.chooseLineDimensionKind(kind, label: label)
+                } label: {
+                    Label(kind == .distance ? "Absolute" : kind == .horizontal ? "Horizontal" : "Vertical",
+                          systemImage: kind == label.kind ? "checkmark" : "")
+                }
+                .accessibilityIdentifier("LineDistanceType-" + kind.rawValue)
+            }
+        } label: {
+            Image(systemName: label.kind == .vertical ? "arrow.up.and.down" :
+                    label.kind == .horizontal ? "arrow.left.and.right" : "arrow.up.right.and.arrow.down.left")
+                .font(.system(size: 13)).foregroundStyle(Color.black)
+                .frame(width: 44, height: 44).contentShape(Rectangle())
+        }
+        .accessibilityLabel("Distance Type")
+        .accessibilityIdentifier("LineDistanceTypeBadge")
+        .position(x: linear.anchor.x - cos(linear.rotation) * (textWidth / 2 + 24),
+                  y: linear.anchor.y - sin(linear.rotation) * (textWidth / 2 + 24))
     }
 
     private func polygonCountAnchor(start: CGPoint, end: CGPoint, in size: CGSize) -> CGPoint {
