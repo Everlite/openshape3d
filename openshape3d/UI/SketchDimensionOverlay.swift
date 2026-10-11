@@ -170,7 +170,7 @@ struct SketchDimensionOverlay: View {
                 draggedLeader = nil
             }
             let defaultOffset: CGFloat = label.isProjectedLineLength ? 0 : (label.isRectangleSize ? 100 : 60)
-            let linear: SketchLinearDimensionLayout?
+            let linear: SketchLinearDimensionLayout.Layout?
             if isLinear {
                 linear = SketchLinearDimensionLayout.make(start: start, end: end, leaderOffset: draggedLeader ?? defaultOffset, awayFrom: interior)
             } else {
