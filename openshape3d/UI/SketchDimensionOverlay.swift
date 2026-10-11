@@ -162,19 +162,27 @@ struct SketchDimensionOverlay: View {
             let arc = arcLeader(label)
             let isLinear = label.isStandaloneLineLength || label.isRectangleSize
             let interior = label.worldRectangleCenter.flatMap(project)
-            // A dragged label (live preview, or a saved/selection-lived
-            // placement) moves the whole leader, as native's does.
-            let draggedLeader: CGFloat? = isLinear
-                ? (diameterDragPreviews[label.id] ?? label.worldLinearLabelAnchor.flatMap(project)).flatMap {
-                    SketchLinearDimensionLayout.leaderOffset(start: start, end: end, textAnchor: $0, awayFrom: interior)
-                } : nil
-            let linear = isLinear
-                ? SketchLinearDimensionLayout.make(start: start, end: end,
-                    leaderOffset: draggedLeader ?? (label.isProjectedLineLength ? 0 : label.isRectangleSize ? 100 : 60),
-                    awayFrom: interior) : nil
-            let radial = label.isArcRadius ? radiusLeader(start, end, text: label.text, compact: label.isCircleRadius && ((label.dimensionID != nil && (label.hasCircleRadiusDirection || viewModel.mode.sketchTool == .circle)) || (viewModel.mode.sketchTool == .circle && viewModel.selectedCircleCenterID == label.refs.first?.entityID)), in: size) : nil
-            let diameter = label.kind == .diameter ? diameterLayout(start, end, anchor: anchor, text: label.text, sketchID: label.sketchID,
-                manualAnchor: diameterDragPreviews[label.id] ?? label.worldDiameterLabelAnchor.flatMap(project), in: size) : nil
+            let previewAnchor = diameterDragPreviews[label.id] ?? label.worldLinearLabelAnchor.flatMap(project)
+            let draggedLeader: CGFloat?
+            if isLinear, let anchorVal = previewAnchor {
+                draggedLeader = SketchLinearDimensionLayout.leaderOffset(start: start, end: end, textAnchor: anchorVal, awayFrom: interior)
+            } else {
+                draggedLeader = nil
+            }
+            let defaultOffset: CGFloat = label.isProjectedLineLength ? 0 : (label.isRectangleSize ? 100 : 60)
+            let linear: SketchLinearDimensionLayout?
+            if isLinear {
+                linear = SketchLinearDimensionLayout.make(start: start, end: end, leaderOffset: draggedLeader ?? defaultOffset, awayFrom: interior)
+            } else {
+                linear = nil
+            }
+
+            let isCompactRadius: Bool = label.isCircleRadius && ((label.dimensionID != nil && (label.hasCircleRadiusDirection || viewModel.mode.sketchTool == .circle)) || (viewModel.mode.sketchTool == .circle && viewModel.selectedCircleCenterID == label.refs.first?.entityID))
+            let radial = label.isArcRadius ? radiusLeader(start, end, text: label.text, compact: isCompactRadius, in: size) : nil
+
+            let manualAnchor = diameterDragPreviews[label.id] ?? label.worldDiameterLabelAnchor.flatMap(project)
+            let diameter = (label.kind == .diameter) ? diameterLayout(start, end, anchor: anchor, text: label.text, sketchID: label.sketchID, manualAnchor: manualAnchor, in: size) : nil
+
             if let arc {
                 Path { path in
                     path.addLines(arc.points)
