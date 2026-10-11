@@ -337,11 +337,12 @@ struct SketchDimensionOverlay: View {
         conflicting: Bool
     ) -> some View {
         if label.isPolygonSideCount {
+            let angle = Double(atan2(end.y - start.y, end.x - start.x)) - Double.pi / 2
             Text(label.text)
                 .font(.system(size: 16))
                 .monospacedDigit()
                 .foregroundStyle(Color.black)
-                .rotationEffect(.radians(atan2(end.y - start.y, end.x - start.x) - .pi / 2))
+                .rotationEffect(.radians(angle))
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
         } else if let arc {
@@ -470,30 +471,51 @@ struct SketchDimensionOverlay: View {
         .accessibilityIdentifier(conflicting ? "DimensionLabelConflict" : "DimensionLabel")
     }
 
+    private func lineDimensionKindTitle(_ kind: DimensionKind) -> String {
+        switch kind {
+        case .distance: return "Absolute"
+        case .horizontal: return "Horizontal"
+        default: return "Vertical"
+        }
+    }
+
+    private func lineDimensionKindIcon(_ kind: DimensionKind) -> String {
+        switch kind {
+        case .vertical: return "arrow.up.and.down"
+        case .horizontal: return "arrow.left.and.right"
+        default: return "arrow.up.right.and.arrow.down.left"
+        }
+    }
+
     @ViewBuilder
     private func dimensionKindMenu(label: EditorViewModel.SketchDimensionLabel, linear: SketchLinearDimensionLayout.Layout) -> some View {
-        let textWidth = (label.text as NSString).size(
+        let textWidth: CGFloat = (label.text as NSString).size(
             withAttributes: [.font: UIFont.monospacedDigitSystemFont(ofSize: 16, weight: .regular)]).width
+        let offset: CGFloat = textWidth / 2 + 24
+        let posX: CGFloat = linear.anchor.x - CGFloat(cos(linear.rotation)) * offset
+        let posY: CGFloat = linear.anchor.y - CGFloat(sin(linear.rotation)) * offset
+        let iconName: String = lineDimensionKindIcon(label.kind)
+
         Menu {
             ForEach(viewModel.dimensionKindChoices, id: \.rawValue) { kind in
                 Button {
                     viewModel.chooseLineDimensionKind(kind, label: label)
                 } label: {
-                    Label(kind == .distance ? "Absolute" : kind == .horizontal ? "Horizontal" : "Vertical",
+                    Label(lineDimensionKindTitle(kind),
                           systemImage: kind == label.kind ? "checkmark" : "")
                 }
                 .accessibilityIdentifier("LineDistanceType-" + kind.rawValue)
             }
         } label: {
-            Image(systemName: label.kind == .vertical ? "arrow.up.and.down" :
-                    label.kind == .horizontal ? "arrow.left.and.right" : "arrow.up.right.and.arrow.down.left")
-                .font(.system(size: 13)).foregroundStyle(Color.black)
-                .frame(width: 44, height: 44).contentShape(Rectangle())
+            Image(systemName: iconName)
+                .font(.system(size: 13))
+                .foregroundStyle(Color.black)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
         .accessibilityLabel("Distance Type")
         .accessibilityIdentifier("LineDistanceTypeBadge")
-        .position(x: linear.anchor.x - cos(linear.rotation) * (textWidth / 2 + 24),
-                  y: linear.anchor.y - sin(linear.rotation) * (textWidth / 2 + 24))
+        .position(x: posX, y: posY)
     }
 
     private func polygonCountAnchor(start: CGPoint, end: CGPoint, in size: CGSize) -> CGPoint {
